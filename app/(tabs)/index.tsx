@@ -8,50 +8,82 @@ import {
   View,
 } from "react-native";
 
-export default function App() {
+export default function HomeScreen() {
   const [step, setStep] = useState("fish");
   const [fish, setFish] = useState("");
   const [feature, setFeature] = useState("");
   const [result, setResult] = useState("");
+  const [confidence, setConfidence] = useState("");
+  const [loading, setLoading] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
+  const cameraRef = useRef(null);
 
-  const cameraRef = useRef<any>(null);
-
-  // Ask camera permission
   useEffect(() => {
-    if (!permission?.granted) {
+    if (!permission) return;
+    if (!permission.granted) {
       requestPermission();
     }
-  }, []);
+  }, [permission]);
 
-  // Fake AI result for now
-  const handleScan = async () => {
-    setResult(""); // clear old result first
-
-    // Later you will use this:
-    if (feature === "Eyes & Skin") {
-      // TODO: call Eyes & Skin model API here
-      // Example:
-      // const response = await fetch("http://your-api/eyes-skin", {...})
-    }
-
-    if (feature === "Gills") {
-      // TODO: call Gills model API here
-      // Example:
-      // const response = await fetch("http://your-api/gills", {...})
-    }
-
-    // Temporary fake result (for prototype/testing only)
-    const fake = Math.random() > 0.5 ? "FRESH" : "NOT FRESH";
-    setResult(fake);
+  // 🔥 RESET FUNCTION (VERY IMPORTANT)
+  const resetScan = () => {
+    setResult("");
+    setConfidence("");
+    setLoading(false);
   };
 
-  if (!permission?.granted) {
+  const handleScan = async () => {
+    try {
+      if (!feature || !fish) {
+        alert("Please select fish and feature");
+        return;
+      }
+
+      // reset before scan
+      resetScan();
+      setLoading(true);
+
+      const photo = await cameraRef.current.takePictureAsync();
+      const uri = photo.uri;
+
+      const formData = new FormData();
+
+      formData.append("file", {
+        uri: uri,
+        name: "image.jpg",
+        type: "image/jpeg",
+      });
+
+      formData.append("fish", fish);
+      formData.append("feature", feature);
+
+      const response = await fetch("http://192.168.1.7:8000/predict", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      setResult(data.result.replace(/_/g, " "));
+      setConfidence(data.confidence + "%");
+    } catch (error) {
+      console.log("ERROR:", error);
+      setResult("Error connecting to server");
+      setConfidence("");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!permission) return <View />;
+
+  if (!permission.granted) {
     return (
       <View style={styles.screen}>
-        <View style={styles.card}>
-          <Text style={styles.subtitle}>Requesting camera permission...</Text>
-        </View>
+        <Text style={{ color: "white" }}>Allow camera permission</Text>
+        <TouchableOpacity onPress={requestPermission}>
+          <Text style={{ color: "yellow" }}>Grant Permission</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -65,10 +97,11 @@ export default function App() {
       <View style={styles.card}>
         <Text style={styles.title}>FreshSure</Text>
 
-        {/* STEP 1: Fish */}
+        {/* STEP 1 */}
         {step === "fish" && (
           <>
             <Text style={styles.subtitle}>Select Fish Type</Text>
+
             {["Bangus", "Tilapia", "Sardines"].map((f) => (
               <TouchableOpacity
                 key={f}
@@ -84,7 +117,7 @@ export default function App() {
           </>
         )}
 
-        {/* STEP 2: Feature */}
+        {/* STEP 2 */}
         {step === "feature" && (
           <>
             <Text style={styles.subtitle}>Fish: {fish}</Text>
@@ -105,7 +138,7 @@ export default function App() {
           </>
         )}
 
-        {/* STEP 3: CAMERA + RESULT BELOW */}
+        {/* STEP 3 */}
         {step === "scan" && (
           <>
             <Text style={styles.subtitle}>
@@ -118,16 +151,35 @@ export default function App() {
               <Text style={styles.buttonText}>Scan Now</Text>
             </TouchableOpacity>
 
-            {result !== "" && (
-              <View style={styles.resultBox}>
-                <Text style={styles.resultText}>Result: {result}</Text>
-              </View>
+            {loading && (
+              <Text style={{ color: "#fff", marginTop: 10 }}>Scanning...</Text>
             )}
 
+            {result !== "" && !loading && (
+              <Text
+                style={{
+                  fontSize: 30,
+                  marginTop: 20,
+                  fontWeight: "bold",
+                  color:
+                    result.toLowerCase() === "fresh" ? "#4CAF50" : "#FF4D4D",
+                }}
+              >
+                {result}
+              </Text>
+            )}
+
+            {confidence !== "" && !loading && (
+              <Text style={{ color: "#ccc", marginTop: 10 }}>
+                Confidence: {confidence}
+              </Text>
+            )}
+
+            {/* 🔥 FIXED BUTTONS */}
             <TouchableOpacity
               style={styles.outlineButton}
               onPress={() => {
-                setResult("");
+                resetScan();
                 setStep("feature");
               }}
             >
@@ -137,7 +189,7 @@ export default function App() {
             <TouchableOpacity
               style={styles.outlineButton}
               onPress={() => {
-                setResult("");
+                resetScan();
                 setFeature("");
                 setFish("");
                 setStep("fish");
@@ -146,12 +198,7 @@ export default function App() {
               <Text style={styles.outlineText}>Change Fish</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.outlineButton}
-              onPress={() => {
-                setResult("");
-              }}
-            >
+            <TouchableOpacity style={styles.outlineButton} onPress={resetScan}>
               <Text style={styles.outlineText}>Scan Again</Text>
             </TouchableOpacity>
           </>
@@ -164,87 +211,63 @@ export default function App() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#001F2D", // deep ocean background
     justifyContent: "center",
     alignItems: "center",
   },
 
   card: {
-    width: "92%",
-    backgroundColor: "rgba(0,0,0,0.04)", // darker overlay
-    borderRadius: 25,
-    padding: 20,
+    width: "90%",
+    backgroundColor: "rgba(0,0,0,0.4)",
+    padding: 10,
+    borderRadius: 10,
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
   },
 
   title: {
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: "bold",
-    color: "#E0FBFC",
+    color: "#fff",
     marginBottom: 15,
-    letterSpacing: 1,
   },
 
   subtitle: {
-    fontSize: 16,
-    color: "#CDECEE",
-    marginBottom: 12,
+    color: "#fff",
+    marginBottom: 10,
   },
 
   button: {
-    backgroundColor: "#005F73",
-    paddingVertical: 14,
-    borderRadius: 18,
+    backgroundColor: "#0077b6",
+    padding: 12,
     width: "100%",
-    marginVertical: 6,
+    borderRadius: 10,
+    marginVertical: 5,
   },
 
   buttonText: {
-    color: "#E0FBFC",
-    fontSize: 16,
-    fontWeight: "600",
+    color: "#fff",
     textAlign: "center",
+    fontWeight: "bold",
   },
 
   outlineButton: {
-    borderWidth: 1.5,
-    borderColor: "#459b90",
-    paddingVertical: 12,
-    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#fff",
+    padding: 10,
     width: "100%",
-    marginTop: 8,
+    borderRadius: 10,
+    marginTop: 5,
   },
 
   outlineText: {
-    color: "#459b90",
+    color: "#fff",
     textAlign: "center",
-    fontWeight: "600",
   },
 
   camera: {
     width: "100%",
-    height: 260,
-    borderRadius: 20,
+    height: 250,
+    borderRadius: 15,
+    marginVertical: 10,
     overflow: "hidden",
-    marginVertical: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-  },
-
-  resultBox: {
-    width: "100%",
-    backgroundColor: "rgba(148,210,189,0.15)",
-    padding: 14,
-    borderRadius: 18,
-    marginTop: 10,
-    alignItems: "center",
-  },
-
-  resultText: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#2f7c7e",
   },
 });
