@@ -1,16 +1,25 @@
 from fastapi import FastAPI, File, UploadFile, Form
 from ultralytics import YOLO
 import shutil
+import uuid
+import os
 
 app = FastAPI()
 
-# MODELS
-sardines_model = YOLO("models/sardines_best.pt")
-gills_model = YOLO("models/gills_best.pt")
+# LOAD ALL MODELS
+sardines_model = YOLO("models/Sardines_best.pt")
+tilapia_model = YOLO("models/Tilapia_best.pt")
+bangus_model = YOLO("models/Bangus_best.pt")
+gills_model = YOLO("models/Gills_best.pt")
+
+# CONFIDENCE THRESHOLD
+THRESHOLD = 80
+
 
 @app.get("/")
 def root():
     return {"status": "Server is running"}
+
 
 @app.post("/predict")
 async def predict(
@@ -18,36 +27,86 @@ async def predict(
     fish: str = Form(...),
     feature: str = Form(...)
 ):
-    file_path = "temp.jpg"
 
-    # save image
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    file_path = ""
 
-    # 🔥 MODEL SELECTION
-    if feature.lower() == "gills":
-        model = gills_model
-        model_name = "gills_best.pt"
-    else:
-        model = sardines_model
-        model_name = "sardines_best.pt"
+    try:
 
-    # 🔥 RUN MODEL
-    results = model(file_path)
-    result = results[0]
+        # CREATE UNIQUE FILE NAME
+        file_path = f"{uuid.uuid4()}.jpg"
 
-    # ✅ CLASSIFICATION FIX (VERY IMPORTANT)
-    probs = result.probs
+        # SAVE IMAGE
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-    if probs is not None:
-        confidence = float(probs.top1conf) * 100
-        label = result.names[probs.top1]
-    else:
-        label = "Unknown"
-        confidence = 0
+        # MODEL SELECTION
+        if feature.lower() == "gills":
+            model = gills_model
+            model_name = "Gills_best.pt"
 
-    return {
-        "result": label.upper(),
-        "confidence": round(confidence, 2),
-        "model_used": model_name
-    }
+        elif fish.lower() == "sardines":
+            model = sardines_model
+            model_name = "Sardines_best.pt"
+
+        elif fish.lower() == "tilapia":
+            model = tilapia_model
+            model_name = "Tilapia_best.pt"
+
+        elif fish.lower() == "bangus":
+            model = bangus_model
+            model_name = "Bangus_best.pt"
+
+        else:
+            return {
+                "error": "Invalid fish type selected"
+            }
+
+        # RUN MODEL
+        results = model(file_path)
+        result = results[0]
+
+        # GET CLASSIFICATION OUTPUT
+        probs = result.probs
+
+        if probs is not None:
+
+            # GET CONFIDENCE
+            confidence = float(probs.top1conf) * 100
+
+            # GET LABEL
+            label = result.names[probs.top1]
+
+            # FINAL RESULT
+            final_result = label.upper()
+
+            # INTERNAL THRESHOLD CHECK
+            low_confidence = confidence < THRESHOLD
+
+        else:
+
+            final_result = "UNKNOWN"
+            confidence = 0
+            low_confidence = True
+
+        # DELETE TEMP IMAGE
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        # RETURN RESULT
+        return {
+            "result": final_result,
+            "confidence": round(confidence, 2),
+            "low_confidence": low_confidence,
+            "model_used": model_name,
+            "threshold": THRESHOLD
+        }
+
+    except Exception as e:
+
+        # DELETE FILE IF ERROR HAPPENS
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+
+        return {
+            "error": str(e)
+        }
